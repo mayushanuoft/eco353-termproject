@@ -1,0 +1,905 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+data_3 <- corporate_credit_risk
+```
+
+
+```{r}
+cleaned_data <- na.omit(data_3)
+```
+
+```{r}
+
+# Print the column names
+print(colnames(cleaned_data))
+
+```
+
+
+```{r}
+# Load necessary library
+
+```
+
+```{r}
+
+
+
+
+```
+
+
+```{r}
+# Assuming 'cleaned_data' is your dataframe
+
+# Adjusted calculations using your provided column names
+cleaned_data$X1 <- (cleaned_data$`Current assets` - cleaned_data$`Current liabilities & provisions`) / cleaned_data$`Total assets`
+cleaned_data$X2 <- cleaned_data$`Reserves and funds` / cleaned_data$`Total assets`  # Approximation for Retained Earnings / Total Assets
+cleaned_data$X3 <- cleaned_data$PBDITA / cleaned_data$`Total assets`  # PBDITA as an approximation for EBIT / Total Assets
+cleaned_data$X4 <- cleaned_data$`Shareholders funds` / cleaned_data$`Total liabilities`  # Shareholders funds as an approximation for Market Value of Equity / Total Liabilities
+cleaned_data$X5 <- cleaned_data$Sales / cleaned_data$`Total assets`  # Sales / Total Assets
+
+# Calculate Altman Z-Score
+cleaned_data$Altman_Z_Score <- 1.2 * cleaned_data$X1 + 1.4 * cleaned_data$X2 + 3.3 * cleaned_data$X3 + 0.6 * cleaned_data$X4 + 1.0 * cleaned_data$X5
+
+# View the first few results of the Altman Z-Score
+head(cleaned_data$Altman_Z_Score)
+
+```
+
+
+
+```{r}
+library(pROC)
+
+# Creating the ROC curve
+roc_curve <- roc(cleaned_data$Default, cleaned_data$predicted_probability, plot = TRUE, main = "ROC Curve for Logistic Regression Model")
+
+# Calculating the AUC
+auc(roc_curve)
+
+```
+```{r}
+# Convert probabilities to binary outcomes based on a threshold
+threshold <- 0.5
+predicted_class <- ifelse(cleaned_data$predicted_probability > threshold, 1, 0)
+# If not already a factor, convert the actual outcomes to a factor
+actual_class <- factor(cleaned_data$Default, levels = c(0, 1))
+
+# Convert predicted_class to a factor with the same levels for consistency
+predicted_class <- factor(predicted_class, levels = c(0, 1))
+
+# Using caret package
+library(caret)
+conf_matrix <- confusionMatrix(predicted_class, actual_class)
+conf_matrix$byClass[c("Sensitivity", "Specificity", "Accuracy")]
+
+```
+```{r}
+# Double-check the conversion to numeric binary outcomes is correct
+cleaned_data$Default_numeric <- as.numeric(cleaned_data$Default) - 1
+
+# Explicitly set the factor levels to ensure 0 is treated as the negative class and 1 as the positive class
+cleaned_data$Default_factor <- factor(cleaned_data$Default_numeric, levels = c(0, 1))
+
+# Check the distribution of Default_factor to ensure there are both positive and negative cases
+table(cleaned_data$Default_factor)
+
+```
+```{r}
+library(pROC)
+roc_result <- roc(response = cleaned_data$Default_factor, 
+                  predictor = as.numeric(cleaned_data$predicted_probability_glmnet))
+
+# Plot ROC curve
+plot(roc_result)
+auc_result <- auc(roc_result)
+cat("AUC:", auc_result, "\n")
+
+```
+
+
+```{r}
+# Load necessary libraries
+library(glmnet)
+library(ggplot2)
+library(pROC)
+
+# Assuming 'cleaned_data' contains 'Default' as the outcome variable and 'X1', 'X2', 'X3', 'X4', 'X5' as predictors
+
+# Convert 'Default' to numeric binary if it's not already, and ensure it's a factor for ROC analysis
+cleaned_data$Default_numeric <- as.numeric(cleaned_data$Default) - 1
+cleaned_data$Default_factor <- factor(cleaned_data$Default_numeric, levels = c(0, 1))
+
+# Prepare data for glmnet: predictor matrix X and response vector Y
+X <- as.matrix(cleaned_data[, c("X1", "X2", "X3", "X4", "X5")])
+Y <- cleaned_data$Default_numeric
+
+# Fit glmnet model using binomial family for logistic regression, with LASSO regularization (alpha = 1)
+set.seed(123)  # For reproducibility
+cv_model <- cv.glmnet(X, Y, family = "binomial", alpha = 1)
+
+# Predict probabilities using the glmnet model for ROC curve analysis
+best_lambda <- cv_model$lambda.min
+cleaned_data$predicted_probability_glmnet <- predict(cv_model, newx = X, s = best_lambda, type = "response")
+
+# Generate and plot ROC curve using predicted probabilities and actual outcomes
+roc_result <- roc(cleaned_data$Default_factor, cleaned_data$predicted_probability_glmnet)
+plot(roc_result, main = "ROC Curve for glmnet Model")
+auc_result <- auc(roc_result)
+print(paste("AUC:", auc_result))
+
+# Optional: Visualization of predictor impact (using an example predictor 'X1')
+# Note: This is conceptual and may need adjustment based on the actual analysis goal
+ggplot(cleaned_data, aes(x = X1, y = predicted_probability_glmnet)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE, color = "blue") +
+  theme_minimal() +
+  labs(x = "Predictor X1", y = "Predicted Probability of Default", 
+       title = "Impact of Predictor X1 on Default Probability (glmnet Model)")
+
+
+```
+```{r}
+# Load necessary libraries
+library(glmnet)
+library(ggplot2)
+library(pROC)
+
+# ... (rest of your existing code)
+
+# Generate and plot ROC curve using predicted probabilities and actual outcomes
+roc_result <- roc(cleaned_data$Default_factor, cleaned_data$predicted_probability_glmnet)
+
+# Calculate AUC
+auc_result <- auc(roc_result)
+
+# Plot the ROC curve with the AUC value in the title
+plot(roc_result, main = sprintf("ROC Curve for glmnet Model (AUC = %.3f)", auc_result))
+
+# ... (rest of your existing code for optional visualization)
+
+
+```
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Assuming 'cleaned_data' contains 'Default' as the outcome variable and 'X1', 'X2', 'X3', 'X4', 'X5' as predictors
+
+# Convert 'Default' to numeric binary if it's not already, and ensure it's a factor for ROC analysis
+cleaned_data$Default_numeric <- as.numeric(cleaned_data$Default) - 1
+cleaned_data$Default_factor <- factor(cleaned_data$Default_numeric, levels = c(0, 1))
+
+# Prepare data for glmnet: predictor matrix X and response vector Y
+X <- as.matrix(cleaned_data[, c("X1", "X2", "X3", "X4", "X5")])
+Y <- cleaned_data$Default_numeric
+
+# Fit glmnet model using binomial family for logistic regression, with LASSO regularization (alpha = 1)
+cv_model <- cv.glmnet(X, Y, family = "binomial", alpha = 1)
+
+# Predict probabilities using the glmnet model for ROC curve analysis
+predicted_probabilities <- predict(cv_model, newx = X, s = "lambda.min", type = "response")
+
+# Calculate the ROC curve and AUC
+roc_result <- roc(response = cleaned_data$Default_factor, predictor = predicted_probabilities)
+
+# Choose a threshold to classify probabilities to binary outcomes
+threshold <- 0.5
+predicted_classes <- ifelse(predicted_probabilities > threshold, 1, 0)
+
+# Convert predicted classes to a factor with levels matching the actual outcomes
+predicted_classes_factor <- factor(predicted_classes, levels = levels(cleaned_data$Default_factor))
+
+# Create a confusion matrix
+confusion_matrix <- table(Predicted = predicted_classes_factor, Actual = cleaned_data$Default_factor)
+
+# Calculate accuracy
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+
+# Print the accuracy
+cat("Accuracy:", accuracy, "\n")
+
+```
+
+```{r}
+# Assuming 'cleaned_data' is your dataframe and it includes 'Altman_Z_Score' and 'Default' columns
+
+# Fit logistic regression model
+model <- glm(Default ~ Altman_Z_Score, family = binomial(link = "logit"), data = cleaned_data)
+
+# Summary of the model to see the relationship and significance
+summary(model)
+
+# Predict probabilities for better insight
+cleaned_data$predicted_probability <- predict(model, type = "response", newdata = cleaned_data)
+
+# To visualize the relationship
+library(ggplot2)
+ggplot(cleaned_data, aes(x = Altman_Z_Score, y = predicted_probability)) +
+  geom_point() +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+  theme_minimal() +
+  labs(x = "Altman Z-Score", y = "Predicted Probability of Default", title = "Relationship between Altman Z-Score and Default Probability")
+
+```
+
+
+```{r}
+partial_model <- glm(Default ~ 
+                       `Shareholders funds/Total_assets` +
+                                  `Borrowings/Total_Assets` +
+                                  `PBDITA as % of total income` +
+                                  `Cash profit as % of total income` +
+                                  `PAT as % of net worth` +
+                                  `Contingent liabilities/Total Assets` +
+                                  `Contingent liabilities / Net worth (%)` +
+                                  `Reserves and funds/Total_Assets` +
+                                  `Current liabilities & provisions/Total_assets` +
+                                  `Total capital/Total_Assets` + 
+                                  `X1` + `X2` + `X3` + `X4` + `X5`, 
+                    family = binomial(link = "logit"), data = cleaned_data)
+
+
+
+
+
+
+
+```
+
+```{r}
+# Construct an input data frame with the exact column names as used in the model
+#input_data <- data.frame(
+  `Shareholders funds/Total_assets` = 7.69 / 100,  # Convert percentages to proportions
+  `Borrowings/Total_Assets` = 9.09 / 100,
+  `PBDITA as % of total income` = 67.77 / 100,
+  `Cash profit as % of total income` = NA,  
+  `PAT as % of net worth` = 1.87 / 100,
+  `Contingent liabilities/Total Assets` = NA,  # 'Not Provided' treated as missing
+  `Contingent liabilities / Net worth (%)` = NA,
+  `Reserves and funds/Total_Assets` = 4.23 / 100,
+  `Current liabilities & provisions/Total_assets` = 88.71 / 100,
+  `Total capital/Total_Assets` = 1,  # Assuming 100% is represented as 1
+  `X1` = -0.8157,
+  `X2` = 0.0423,
+  `X3` = 0.0042,
+  `X4` = NA, 
+  `X5` = NA   
+)
+
+# Assuming the model 'partial_model' is already trained and available in the environment
+predicted_probabilities <- predict(partial_model, newdata = input_data, type = "response")
+
+# Print the predicted probabilities
+predicted_probabilities
+
+```
+```{r}
+# Rename columns to avoid spaces and special characters
+names(cleaned_data) <- make.names(names(cleaned_data), unique = TRUE)
+
+# Check the new column names
+print(names(cleaned_data))
+
+```
+```{r}
+partial_model <- glm(Default ~ Shareholders.funds.Total_assets +
+                                  Borrowings.Total_Assets +
+                                  PBDITA.as...of.total.income +
+                                  Cash.profit.as...of.total.income +
+                                  PAT.as...of.net.worth +
+                                  Contingent.liabilities.Total.Assets +
+                                  Contingent.liabilities...Net.worth.... +
+                                  Reserves.and.funds.Total_Assets +
+                                  Current.liabilities...provisions.Total_assets +
+                                 Total.capital.Total_Assets + 
+                                  X1 + X2 + X3 + X4 + X5, 
+                    family = binomial(link = "logit"), data = cleaned_data)
+
+```
+
+```{r}
+# Load necessary libraries
+if (!requireNamespace("glmnet", quietly = TRUE)) install.packages("glmnet")
+if (!requireNamespace("pROC", quietly = TRUE)) install.packages("pROC")
+if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret")
+
+library(glmnet)
+library(pROC)
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Ensure 'Default' is a factor with two levels (e.g., "0" and "1")
+cleaned_data$Default <- factor(cleaned_data$Default, levels = c("0", "1"))
+
+# Create stratified indices for the training set using the caret package
+trainIndex <- createDataPartition(cleaned_data$Default, p = 0.7, list = FALSE, times = 1)
+
+# Split the data using the stratified indices
+training_data <- cleaned_data[trainIndex, ]
+test_data <- cleaned_data[-trainIndex, ]
+
+# Prepare the predictor matrix for the training data
+x_train <- as.matrix(training_data[, c("Shareholders.funds.Total_assets",
+                                       "Borrowings.Total_Assets",
+                                       "PBDITA.as...of.total.income",
+                                       "Cash.profit.as...of.total.income",
+                                       "PAT.as...of.net.worth",
+                                       "Contingent.liabilities.Total.Assets",
+                                       "Contingent.liabilities...Net.worth....",
+                                       "Reserves.and.funds.Total_Assets",
+                                       "Current.liabilities...provisions.Total_assets",
+                                       "Total.capital.Total_Assets",
+                                       "X1", "X2", "X3", "X4", "X5")])
+y_train <- training_data$Default
+
+# Fit the glmnet model on the stratified training data
+cv_fit <- cv.glmnet(x_train, y_train, family = "binomial", alpha = 1)
+
+# Prepare the predictor matrix for the test data
+x_test <- as.matrix(test_data[, c("Shareholders.funds.Total_assets",
+                                  "Borrowings.Total_Assets",
+                                  "PBDITA.as...of.total.income",
+                                  "Cash.profit.as...of.total.income",
+                                  "PAT.as...of.net.worth",
+                                  "Contingent.liabilities.Total.Assets",
+                                  "Contingent.liabilities...Net.worth....",
+                                  "Reserves.and.funds.Total_Assets",
+                                  "Current.liabilities...provisions.Total_assets",
+                                  "Total.capital.Total_Assets",
+                                  "X1", "X2", "X3", "X4", "X5")])
+
+# Predict probabilities for the test set
+predicted_probabilities <- predict(cv_fit, newx = x_test, s = cv_fit$lambda.min, type = "response")
+
+# Ensure that the length of the predicted probabilities is the same as the number of rows in test_data
+if (length(predicted_probabilities) != nrow(test_data)) {
+    stop("Mismatch between the number of predictions and the number of observations in the test set.")
+}
+
+# Calculate the ROC curve and AUC
+roc_result <- roc(response = test_data$Default, predictor = as.numeric(predicted_probabilities))
+auc_result <- auc(roc_result)
+
+# Plot the ROC curve
+plot(roc_result, main = paste("ROC Curve (AUC = ", round(auc_result, 3), ")", sep=""))
+
+# Identify the optimal threshold from ROC
+coords_result <- coords(roc_result, "best", ret="threshold")
+optimal_threshold <- coords_result[1]
+
+# Calculate specificity and sensitivity at the optimal threshold
+predicted_classes <- ifelse(predicted_probabilities > optimal_threshold, "1", "0")
+
+# Ensure that predicted_classes is a factor with the same levels as test_data$Default
+predicted_classes_factor <- factor(predicted_classes, levels = levels(test_data$Default))
+
+# Now the lengths should match, and we can create the confusion matrix
+conf_matrix <- table(Predicted = predicted_classes_factor, Actual = test_data$Default)
+sensitivity <- conf_matrix["1", "1"] / (conf_matrix["1", "1"] + conf_matrix["1", "0"])
+specificity <- conf_matrix["0", "0"] / (conf_matrix["0", "0"] + conf_matrix["0", "1"])
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+# Print the metrics
+cat("Optimal Threshold:", optimal_threshold, "\n")
+cat("Sensitivity (Recall):", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+cat("Accuracy:", accuracy, "\n")
+```
+
+
+```{r}
+# Ensure 'Default' is a factor if it's not already, and it has two levels (e.g., 0 and 1)
+cleaned_data$Default <- factor(cleaned_data$Default, levels = c("0", "1"))
+# Option 1: Remove rows with any NA values in the dataset
+cleaned_data_complete <- na.omit(cleaned_data)
+
+# Option 2: Impute missing values (simple example)
+# You might need a more sophisticated approach based on the nature of your data
+cleaned_data[is.na(cleaned_data)] <- 0  # Example of setting NAs to 0, not always appropriate
+
+
+```
+
+
+```{r}
+ install.packages("glmnet")
+install.packages("Matrix")
+library(glmnet)
+library(Matrix)
+
+```
+
+
+```{r}
+library(glmnet)
+library(Matrix)
+
+prediction_data <- data.frame(
+  Shareholders.funds.Total_assets = 7.69 / 100,  # Converting percentage to a proportion
+  Borrowings.Total_Assets = 9.09 / 100,
+  PBDITA.as...of.total.income = 67.77 / 100,
+  Cash.profit.as...of.total.income = 0,  # Assuming 'Not Calculable' implies 0
+  PAT.as...of.net.worth = 1.87 / 100,
+  Contingent.liabilities.Total.Assets = 0,  # Adjusted name to match model
+  Contingent.liabilities...Net.worth.... = 0,  # Keeping as is
+  Reserves.and.funds.Total_Assets = 4.23 / 100,  # Adjusted name to match model
+  Current.liabilities...provisions.Total_assets = 88.71 / 100,  # Adjusted name to match model
+  Total.capital.Total_Assets = 1,  # Adjusted name to match model, assuming 100% is represented as 1
+  X1 = -0.8157,
+  X2 = 0.0423,
+  X3 = 0.0042,
+  X4 = 0,  # Assuming an imputed value of 0 for demonstration
+  X5 = 0   # Assuming an imputed value of 0 for demonstration
+)
+
+```
+
+```{r}
+# Assuming cleaned_data is your original dataframe
+# Prepare predictor matrix with the correct column names
+x_matrix <- as.matrix(cleaned_data[, c("Shareholders.funds.Total_assets",
+                                       "Borrowings.Total_Assets",
+                                       "PBDITA.as...of.total.income",
+                                       "Cash.profit.as...of.total.income",  # Corrected
+                                       "PAT.as...of.net.worth",  # Corrected
+                                       "Contingent.liabilities.Total.Assets",  # Corrected
+                                       "Contingent.liabilities...Net.worth....",  # Kept as is based on formula
+                                       "Reserves.and.funds.Total_Assets",  # Corrected
+                                       "Current.liabilities...provisions.Total_assets",  # Corrected
+                                       "Total.capital.Total_Assets",  # Corrected
+                                       "X1", "X2", "X3", "X4", "X5")])
+
+# Ensure y_vector is correctly prepared
+y_vector <- cleaned_data$Default  # Assuming 'Default' is your outcome variable
+
+# Ensure y_vector is a binary factor or numeric vector
+y_vector <- as.factor(y_vector)  # Convert to factor if it
+
+```
+
+
+
+```{r}
+# Install and load required packages
+if (!requireNamespace("glmnet", quietly = TRUE)) install.packages("glmnet")
+library(glmnet)
+
+# Fit the glmnet model
+set.seed(123)  # For reproducibility
+cv_fit <- cv.glmnet(x_matrix, y_vector, family = "binomial", alpha = 1)
+
+# View the best lambda value determined by cross-validation
+best_lambda <- cv_fit$lambda.min
+print(best_lambda)
+
+```
+
+```{r}
+new_data <- data.frame(
+  Shareholders.funds.Total_assets = 7.69 / 100,  # Converting percentage to a proportion
+  Borrowings.Total_Assets = 9.09 / 100,
+  PBDITA.as...of.total.income = 67.77 / 100,
+  Cash.profit.as...of.total.income = 0,  # Corrected name & assuming 'Not Calculable' implies 0
+  PAT.as...of.net.worth = 1.87 / 100,  # Corrected name
+  Contingent.liabilities.Total.Assets = 0,  # Corrected name & assuming 'Not Provided' implies 0
+  Contingent.liabilities...Net.worth.... = 0,  # Kept as is based on the formula
+  Reserves.and.funds.Total_Assets = 4.23 / 100,  # Corrected name
+  Current.liabilities...provisions.Total_assets = 88.71 / 100,  # Corrected name
+  Total.capital.Total_Assets = 1,  # Corrected name & assuming 100% is represented as 1
+  X1 = -0.8157,
+  X2 = 0.0423,
+  X3 = 0.0042,
+  X4 = 0,  # Assuming an imputed value of 0 for demonstration
+  X5 = 0   # Assuming an imputed value of 0 for demonstration
+)
+
+
+```
+
+```{r}
+# Convert new_data to a matrix, as required by glmnet
+prediction_matrix <- as.matrix(new_data)
+
+```
+
+```{r}
+# Assuming cv_fit is your previously fitted glmnet model
+predicted_probabilities_glmnet <- predict(cv_fit, newx = prediction_matrix, s = "lambda.min", type = "response")
+
+# Print the predicted probabilities
+print(predicted_probabilities_glmnet)
+
+
+```
+
+```{r}
+# Extract the predicted probabilities
+predicted_probabilities <- as.vector(predict(cv_fit, newx = prediction_matrix, s = "lambda.min", type = "response"))
+
+# Print the predicted probabilities
+cat("Predicted probability of default:", predicted_probabilities, "\n")
+
+```
+```{r}
+# Assuming 'predicted_probabilities' contains the probabilities from the glmnet model
+predicted_probabilities <- as.vector(predict(cv_fit, newx = prediction_matrix, s = "lambda.min", type = "response"))
+
+# Define the thresholds and corresponding ratings
+thresholds <- c(1/600, 1/300, 1/150, 1/30, 1/10, 1/5, 1/2, 1)
+ratings <- c("AAA", "AA", "A", "BBB", "BB", "B", "CCC", "CC", "D")
+
+# Function to classify each probability into a rating
+classify_rating <- function(prob) {
+  # Find the first threshold that is greater than the probability
+  index <- findInterval(prob, vec = c(-Inf, thresholds), rightmost.closed = TRUE)
+  # Return the corresponding rating
+  return(ratings[index])
+}
+
+# Apply the classification function to each predicted probability
+classified_ratings <- sapply(predicted_probabilities, classify_rating)
+
+# Print the classified ratings
+cat("Classified ratings:", classified_ratings, "\n")
+
+```
+
+```{r}
+# Set seed for reproducibility
+set.seed(123)
+
+# Generate indices for the training set
+train_indices <- sample(1:nrow(cleaned_data_complete), size = 0.7 * nrow(cleaned_data_complete), replace = FALSE)
+
+# Split the cleaned_data_complete into training and testing sets based on indices
+training_data <- cleaned_data_complete[train_indices, ]
+test_data <- cleaned_data_complete[-train_indices, ]
+
+
+
+```
+
+
+
+```{r}
+
+# Prepare the predictor matrix for the test data
+x_test <- as.matrix(test_data[, c("Shareholders.funds.Total_assets",
+                                  "Borrowings.Total_Assets",
+                                  "PBDITA.as...of.total.income",
+                                  "Cash.profit.as...of.total.income",
+                                  "PAT.as...of.net.worth",
+                                  "Contingent.liabilities.Total.Assets",
+                                  "Contingent.liabilities...Net.worth....",
+                                  "Reserves.and.funds.Total_Assets",
+                                  "Current.liabilities...provisions.Total_assets",
+                                  "Total.capital.Total_Assets",
+                                  "X1", "X2", "X3", "X4", "X5")])
+
+# Predict probabilities for the test set
+predicted_probabilities <- predict(cv_fit, newx = x_test, s = "lambda.min", type = "response")
+
+```
+
+
+```{r}
+# Ensure the pROC package is installed and loaded
+if (!requireNamespace("pROC", quietly = TRUE)) install.packages("pROC")
+library(pROC)
+
+# Calculate the ROC curve and AUC
+# Ensure the actual outcomes are correctly formatted as a factor
+actual_outcomes <- factor(test_data$Default)
+
+# Calculate ROC and AUC
+roc_result <- roc(actual_outcomes, as.numeric(predicted_probabilities))
+auc_result <- auc(roc_result)
+
+# Plot the ROC curve
+plot(roc_result, main = paste("ROC Curve (AUC = ", round(auc_result, 3), ")", sep=""))
+
+```
+```{r}
+# Convert predicted probabilities to binary class predictions based on the threshold
+threshold <- 0.5
+predicted_classes <- ifelse(predicted_probabilities > threshold, 1, 0)
+
+# Convert actual outcomes and predicted classes to factors to ensure consistency in levels
+actual_classes_factor <- factor(actual_outcomes, levels = c(0, 1))
+predicted_classes_factor <- factor(predicted_classes, levels = c(0, 1))
+
+# Create a confusion matrix from actual and predicted classes
+confusion_matrix <- table(Predicted = predicted_classes_factor, Actual = actual_classes_factor)
+
+# Calculate sensitivity (True Positive Rate or Recall)
+sensitivity <- confusion_matrix[2, 2] / (confusion_matrix[2, 2] + confusion_matrix[2, 1])
+
+# Calculate specificity (True Negative Rate)
+specificity <- confusion_matrix[1, 1] / (confusion_matrix[1, 1] + confusion_matrix[1, 2])
+
+# Calculate accuracy
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+
+# Print the metrics
+cat("Sensitivity (Recall):", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+cat("Accuracy:", accuracy, "\n")
+
+
+```
+
+
+```{r}
+library(glmnet)
+
+# Prepare the predictor matrix and response vector for glmnet
+x_train <- as.matrix(training_data[, -which(names(training_data) == "Default")])
+y_train <- training_data$Default
+
+# Fit the model using glmnet
+set.seed(123)  # For reproducibility
+cv_fit <- cv.glmnet(x_train, y_train, family = "binomial", alpha = 1)
+
+# Determine the best lambda value
+best_lambda <- cv_fit$lambda.min
+
+```
+
+
+
+```{r}
+
+# Assuming 'test_data' is your testing dataset and 'Default' is the column with actual outcomes
+actual_outcomes <- test_data$Default
+
+# Calculate the ROC curve
+roc_result <- roc(response = actual_outcomes, predictor = predicted_probabilities)
+
+# Plot the ROC curve
+plot(roc_result, main = "ROC Curve", col = "#1c61b6")
+# Add AUC to the plot
+auc(roc_result)
+print(auc(roc_result))
+
+# Adding color and additional details to the plot
+plot(roc_result, main = "ROC Curve", col = "#1c61b6", print.auc = TRUE, print.auc.x = 0.4, print.auc.y = 0.2)
+
+```
+
+
+
+```{r}
+# Extract the predicted probability of default from the predictions
+predicted_prob <- predicted_probabilities_glmnet[1, 1] # assuming there's only one observation
+print(predicted_prob)
+
+```
+
+```{r}
+# Example of converting probabilities to binary predictions with a threshold of 0.5
+binary_predictions <- ifelse(predicted_probabilities_glmnet > 0.5, 1, 0)
+
+# Print the binary predictions
+print(binary_predictions)
+
+
+```
+```{r}
+# Assuming test_data is prepared similarly to how cleaned_data was prepared
+test_matrix <- as.matrix(test_data[, -which(names(test_data) == "Default")])
+test_actual <- as.factor(test_data$Default)  # Ensure this is a factor with levels c("0", "1")
+
+# Predict on the test set
+test_predicted_probabilities <- predict(cv_fit, newx = test_matrix, s = "lambda.min", type = "response")
+
+# Convert to binary predictions using a 0.5 threshold
+test_binary_predictions <- ifelse(test_predicted_probabilities > 0.5, "1", "0")
+
+# Load caret for confusionMatrix
+if (!requireNamespace("caret", quietly = TRUE)) install.packages("caret")
+library(caret)
+
+# Evaluate with a Confusion Matrix
+confusionMatrix(test_binary_predictions, test_actual)
+
+```
+
+
+```{r}
+# Display all column names in the cleaned_data data frame
+print(names(cleaned_data))
+
+```
+
+
+```{r}
+# Check if 'x1' to 'x5' are in the 'cleaned_data' data frame
+vars_to_check <- paste0("x", 1:5)
+missing_vars <- vars_to_check[!vars_to_check %in% names(cleaned_data)]
+
+# If there are missing variables, print a message
+if(length(missing_vars) > 0) {
+  stop("The following variables are missing in 'cleaned_data': ", paste(missing_vars, collapse = ", "))
+}
+
+# If all variables are present, fit the model
+partial_model <- glm(Default ~ `Shareholders funds/Total_assets` +
+                                  `Borrowings/Total_Assets` +
+                                  `PBDITA as % of total income` +
+                                  `Cash profit as % of total income` +
+                                  `PAT as % of net worth` +
+                                  `Contingent liabilities/Total Assets` +
+                                  `Contingent liabilities / Net worth (%)` +
+                                  `Reserves and funds/Total_Assets` +
+                                  `Current liabilities & provisions/Total_assets` +
+                                  `Total capital/Total_Assets` +
+                                  x1 + x2 + x3 + x4 + x5, 
+                    family = binomial(link = "logit"), data = cleaned_data)
+
+```
+
+```{r}
+head(cleaned_data)
+```
+
+
+```{r}
+# Generate predictions from the model
+probabilities <- predict(partial_model, type = "response")
+predicted_classes <- ifelse(probabilities > 0.5, 1, 0) # assuming 0.5 as the threshold
+
+# Actual classes
+actual_classes <- cleaned_data$Default
+
+# Create the confusion matrix
+conf_matrix <- table(Predicted = predicted_classes, Actual = actual_classes)
+
+# Calculate accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+print(accuracy)
+
+# You can also use the caret package for a more detailed confusion matrix
+library(caret)
+confusionMatrix(conf_matrix)
+
+```
+
+
+```{r}
+library(MASS)
+
+# Assuming 'cleaned_data' is your dataframe and 'Default' is the binary outcome column
+
+# Initial full model with all predictors. Replace 'predictor1', 'predictor2', etc., with your actual column names
+full_model <- glm(Default ~ ., family = binomial(link = "logit"), data = cleaned_data)
+
+# Stepwise model selection based on AIC
+step_model <- stepAIC(full_model, direction = "both")
+
+# Summary of the selected model
+summary(step_model)
+
+# Predict probabilities with the selected model
+cleaned_data$predicted_probability <- predict(step_model, type = "response")
+
+# To get a list of the final model's variables
+print(names(coef(step_model)))
+
+```
+
+
+
+
+```{r}
+library(caret)
+
+# Assuming your Default column is binary (0 and 1) and 'cleaned_data' is your dataset
+# First, decide on a probability threshold to determine class predictions
+threshold <- 0.5  # This is an arbitrary threshold
+predicted_class <- ifelse(cleaned_data$predicted_probability > threshold, 1, 0)
+
+# Create a confusion matrix
+conf_matrix <- confusionMatrix(factor(predicted_class), factor(cleaned_data$Default))
+
+# Print out the confusion matrix to see accuracy, sensitivity, specificity, etc.
+print(conf_matrix)
+
+# To get just the accuracy
+accuracy <- conf_matrix$overall['Accuracy']
+print(accuracy)
+
+```
+
+
+```{r}
+
+
+library(ggplot2)
+
+# Assuming 'cleaned_data' is your dataset and it has a column 'predicted_probability'
+ggplot(cleaned_data, aes(x = predicted_probability)) + 
+  geom_histogram(binwidth = 0.05,   # Set the width of the bins for your histogram
+                 color = "black",   # Color of the bin border
+                 fill = "blue") +   # Color of the bin
+  labs(x = "Predicted Probability",
+       y = "Frequency",
+       title = "Histogram of Predicted Probabilities") +
+  theme_minimal()  # Using a minimal theme for aesthetics
+
+
+
+```
+
+```{r}
+head(cleaned_data)
+```
+
+```{r}
+# Assuming 'cleaned_data' is your dataset and it has a column 'predicted_probability'
+ggplot(cleaned_data, aes(x = predicted_probability)) + 
+  geom_histogram(binwidth = 0.05,   # Set the width of the bins for your histogram
+                 color = "black",   # Color of the bin border
+                 fill = "blue") +   # Color of the bin
+  labs(x = "Predicted Probability",
+       y = "Frequency",
+       title = "Histogram of Predicted Probabilities") +
+  theme_minimal()  # Using a minimal theme for aesthetics
+
+```
+
+
+
+```{r}
+# Assuming 'cleaned_data' is the data frame and 'predicted_probability' is a column of numeric probabilities
+# Define the thresholds as the upper limit for each category, assuming the probabilities are given in ascending order
+thresholds <- c(1/600, 1/300, 1/150, 1/30, 1/10, 1/5, 1/2, 1)
+ratings <- c("AAA", "AA", "A", "BBB", "BB", "B", "CCC", "CC", "D")
+
+# Function to classify the probability into ratings
+classify_rating <- function(prob) {
+  # Find the index of the first threshold that is greater than the probability
+  index <- which(thresholds >= prob)[1]
+  # Return the corresponding rating or the last rating 'D' if no threshold is found
+  if (length(index) > 0) {
+    return(ratings[index])
+  } else {
+    return("D")
+  }
+}
+
+# Apply the function to the predicted_probability column to create a new ratings column
+cleaned_data$S_P_Rating <- sapply(cleaned_data$predicted_probability, classify_rating)
+
+# View the updated data frame
+head(cleaned_data)
+
+```
+
+```{r}
+# Assuming the S&P ratings have already been assigned to the cleaned_data$S_P_Rating column
+
+# Calculate the frequency distribution of the S&P ratings
+rating_distribution <- table(cleaned_data$S_P_Rating)
+
+# Create a bar plot of the distribution
+barplot(rating_distribution, 
+        main = "S&P Rating Distribution", 
+        xlab = "S&P Ratings", 
+        ylab = "Frequency", 
+        col = "blue", 
+        las = 1)  # Sets the orientation of axis labels to horizontal
+
+```
+
+
