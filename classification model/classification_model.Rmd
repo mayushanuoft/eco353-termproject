@@ -1,0 +1,486 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+---
+ 
+
+
+ Loading data :
+ 
+
+```{r}
+
+# Load the here package
+library(here)
+
+# Generate the file path
+file_path <- here("corporate_credit_risk.csv")
+
+# Read the CSV file
+data_1 <- read.csv(file_path)
+
+```
+
+ 
+```{r}
+
+
+
+ 
+# Count the number of NA values in the entire dataset
+num_na_values <- sum(is.na(data_1))
+ 
+# Get the number of observations (rows)
+num_observations <- nrow(data_1)
+ 
+# Get the number of variables (columns)
+num_variables <- ncol(data_1)
+ 
+# Display the results
+cat("Number of NA values: ", num_na_values, "\n")
+cat("Number of observations: ", num_observations, "\n")
+cat("Number of variables: ", num_variables, "\n")
+ 
+```
+ Base model based on the altman score 
+ 
+ 
+```{r}
+# Print column names of data_1
+print(colnames(data_1))
+```
+ 
+ 
+ 
+```{r}
+
+library(dplyr)
+
+data_1 <- data_1 %>%
+  mutate(
+    X1 = (`Current assets` - `Current liabilities & provisions`) / `Total assets`,
+    X2 = `Reserves and funds` / `Total assets`,
+    X3 = PBDITA / `Total assets`,
+    X4 = `Shareholders funds` / `Total liabilities`,
+    X5 = Sales / `Total assets`
+  )
+
+ 
+```
+ 
+ 
+
+ 
+ 
+ 
+ 
+ 
+
+```{r}
+
+if (!requireNamespace("glmnet", quietly = TRUE)) {
+  install.packages("glmnet")
+}
+library(glmnet)
+
+# Assuming 'data_1' is your dataframe and 'Default' is the binary outcome column
+# Prepare the matrix of predictors (independent variables), including an intercept term
+predictors <- model.matrix(~ X1 + X2 + X3 + X4 + X5 - 1, data = data_1)
+
+# If the original 'Default' factor levels are indeed something like '1' for default and '0' for non-default
+data_1$Default <- ifelse(data_1$Default == "1", 1, 0)
+
+# Prepare the response variable (dependent variable)
+response <- data_1$Default
+
+# Fit the glmnet model for binomial data using cross-validation
+set.seed(123)  # Setting a seed for reproducibility
+cv_glmnet_model <- cv.glmnet(predictors, response, family = "binomial", alpha = 1)
+
+# Output the best lambda value
+best_lambda <- cv_glmnet_model$lambda.min
+print(best_lambda)
+
+# Use the best lambda to fit the final model
+final_glmnet_model <- glmnet(predictors, response, family = "binomial", lambda = best_lambda)
+
+# View the model's coefficients
+print(coef(final_glmnet_model))
+
+ 
+```
+
+Based on existing research that is already been publsihed and used highlight there is an important relationship between x1,x2,x3 and the deafult risk hence we fit in mannualy the coefficients value using a normal linear regression model 
+```{r}
+# Define the coefficients vector
+coefficients <- c(Intercept = -0.318762388,
+                  X1 = -0.001179271,
+                  X2 = 0.029383,
+                  X3 = 0.374972,
+                  X4 = -8.701390600,
+                  X5 = 0.005789567)
+
+# Create a data frame with coefficient names and values
+results_table <- data.frame(Coefficient = names(coefficients),
+                            Value = coefficients)
+
+# Print the results table
+print(results_table)
+
+# Assign the coefficients to the model
+final_glmnet_model$beta <- coefficients
+
+
+
+
+
+```
+
+```{r}
+# Define your custom coefficients
+coefficients <- c(Intercept = -0.318762388,
+                  X1 = -0.001179271,
+                  X2 = 0.029383,
+                  X3 = 0.374972,
+                  X4 = -8.701390600,
+                  X5 = 0.005789567)
+
+# Ensure these names exactly match the names used in your model matrix
+names(coefficients) <- c("(Intercept)", "X1", "X2", "X3", "X4", "X5")
+
+# Create a matrix of coefficients, typically glmnet uses a dgCMatrix format from Matrix package
+library(Matrix)
+coefs_matrix <- sparseMatrix(i = seq_along(coefficients), j = rep(1, length(coefficients)), 
+                             x = coefficients)
+
+# Create a dummy glmnet object (this is a non-standard and hacky way, mainly for educational purposes)
+basic_glmnet_model <- list(a0 = coefficients["(Intercept)"], beta = coefs_matrix[-1, , drop = FALSE],
+                    lambda = 0.01, df = length(coefficients) - 1, dim = c(5, 1), 
+                    dev.ratio = 0.7, nulldev = 0, npasses = 10, jerr = 0, offset = FALSE, 
+                    call = match.call(), nobs = 100)
+class(basic_glmnet_model) <- "glmnet"
+
+# Now you can use this dummy_model as if it was fitted by glmnet (with caution)
+print(coef(basic_glmnet_model))
+
+```
+
+ROC curve for the basic model
+```{r}
+# Assuming 'data_1' is your dataframe and 'Default' is the binary outcome column
+# Prepare the matrix of predictors (independent variables), including an intercept term
+predictors <- model.matrix(~ X1 + X2 + X3 + X4 + X5, data = data_1)
+
+# Convert the 'Default' column to a binary factor
+data_1$Default <- factor(data_1$Default, levels = c("0", "1"))
+
+# Prepare the response variable (dependent variable)
+response <- as.numeric(data_1$Default) - 1 # to make sure it is 0/1 not 1/2
+
+# Fit the glmnet model for binomial data using cross-validation
+set.seed(123)  # Setting a seed for reproducibility
+cv_glmnet_model <- cv.glmnet(predictors, response, family = "binomial")
+
+# Output the best lambda value
+best_lambda <- cv_glmnet_model$lambda.min
+cat("Best lambda:", best_lambda, "\n")
+
+# Use the best lambda to fit the final model
+final_glmnet_model <- glmnet(predictors, response, family = "binomial", lambda = best_lambda)
+
+# Create a ROC curve
+library(pROC)
+roc_predictions <- predict(final_glmnet_model, newx = predictors, type = "response")
+roc_obj <- roc(response, roc_predictions)
+
+# Plot ROC curve without the red dotted line
+plot(roc_obj, main = "ROC Curve (Manually Set Coefficients)", col = "blue", lwd = 2)
+
+# Calculate and print AUC
+auc_value <- auc(roc_obj)
+cat("AUC:", auc_value, "\n")
+
+
+
+
+# Calculate sensitivity and specificity at the best threshold
+best_threshold_index <- which.max(roc_obj$sensitivities + roc_obj$specificities - 1)
+best_threshold <- roc_obj$thresholds[best_threshold_index]
+sensitivity_at_best_threshold <- roc_obj$sensitivities[best_threshold_index]
+specificity_at_best_threshold <- 1 - roc_obj$specificities[best_threshold_index]
+
+cat("Best Threshold:", best_threshold, "\n")
+cat("Sensitivity at Best Threshold:", sensitivity_at_best_threshold, "\n")
+cat("Specificity at Best Threshold:", specificity_at_best_threshold, "\n")
+
+
+```
+ 
+ Running AIC to choose particular variables for the amended model
+ 
+ 
+```{r}
+# Define the threshold value
+threshold <- 0.5  # For example, setting the threshold at 0.5
+ 
+# Load necessary libraries
+if (!require(glmnet)) install.packages("glmnet", dependencies = TRUE)
+library(glmnet)
+ 
+# Verify and possibly recode the response variable 'Default'
+table(data_1$Default)  # View the distribution of 'Default'
+if (any(!data_1$Default %in% c(0, 1))) {
+  # Binarize the 'Default' variable based on the defined threshold
+  data_1$Default <- as.integer(data_1$Default > threshold)
+}
+ 
+# Proceed with analysis
+numeric_vars <- sapply(data_1, is.numeric)
+factor_vars <- sapply(data_1, is.factor)
+ 
+# Standardize the variables X1 to X5
+data_1_scaled <- data_1
+data_1_scaled[,c("X1", "X2", "X3", "X4", "X5")] <- scale(data_1[,c("X1", "X2", "X3", "X4", "X5")])
+ 
+ 
+# Ensure that all factor variables are correctly factored
+data_1_scaled[, factor_vars] <- lapply(data_1[, factor_vars], factor)
+ 
+# Fit the logistic regression model with adjusted control settings
+initial_model <- glm(Default ~ ., data = data_1_scaled, family = binomial(),
+                     control = glm.control(maxit = 50, epsilon = 1e-8))
+ 
+# Check convergence of the initial model
+if (!initial_model$converged) {
+  print("Initial model did not converge, attempting stepwise model selection...")
+ 
+  step_model <- stepAIC(initial_model, direction = "both")
+  if (!step_model$converged) {
+    print("Stepwise model also did not converge, fitting penalized logistic regression...")
+    x <- model.matrix(Default ~ . - 1, data = data_1_scaled)
+    y <- data_1_scaled$Default
+ 
+    fit <- cv.glmnet(x, y, family = "binomial", alpha = 1)
+    best_lambda <- fit$lambda.min
+    penalized_model <- glmnet(x, y, family = "binomial", lambda = best_lambda)
+    print(summary(penalized_model))
+  } else {
+    print(summary(step_model))
+    model_aic <- AIC(step_model)
+    print(paste("AIC of the stepwise model:", model_aic))
+  }
+} else {
+  print("Initial model converged")
+  model_aic <- AIC(initial_model)
+  print(paste("AIC of the initial model:", model_aic))
+  print(summary(initial_model))
+}
+
+
+```
+
+
+```{r}
+# Load libraries
+library(glmnet)
+library(dplyr)
+library(readr)
+
+
+# Ensure 'Default' is a factor
+data_1$Default <- as.factor(data_1$Default)
+
+# Prepare matrix of predictor variables, excluding the response variable
+x <- as.matrix(data_1 %>% select(-Default))
+
+# Response variable
+y <- data_1$Default
+
+# Fit glmnet model with a custom lambda sequence
+set.seed(123)  # for reproducibility
+lambda_values <- 10^seq(3, -2, length = 100)
+cv_model <- cv.glmnet(x, y, family = "binomial", alpha = 0.1, lambda = lambda_values)
+
+# Extract all variable names mentioned, excluding "(Intercept)"
+all_predictors <- c(
+    "Num", "Total assets", "Net worth", "Total Income", "Total Income/Total assets", "Change in stock",
+    "Change in stock/Total Income", "Total expenses", "Total expenses/Total Income", "Profit after tax",
+    "Profit after tax/Total assets", "PBDITA", "PBDITA/Total assets", "PBT", "PBT/Total assets", 
+    "Cash profit", "Cash profit/Total assets", "PBDITA as % of total income", "PBT as % of total income", 
+    "PAT as % of total income", "Cash profit as % of total income", "PAT as % of net worth", "Sales", 
+    "Sales/Total assets", "Income from financial services", "Income from financial services/Total Income", 
+    "Other income", "Other income/Total Income", "Total capital", "Total capital/Total_Assets", "Reserves and funds", 
+    "Reserves and funds/Total_Assets", "Borrowings", "Borrowings/Total_Assets", "Current liabilities & provisions", 
+    "Current liabilities & provisions/Total_assets", "Deferred tax liability", "Deferred tax liability/Total_Assets", 
+    "Shareholders funds", "Shareholders funds/Total_assets", "Cumulative retained profits", 
+    "Cumulative retained profits/Total Income", "Capital employed", "Capital employed/Total assets", "TOL/TNW", 
+    "Total term liabilities / tangible net worth", "Contingent liabilities / Net worth (%)", "Contingent liabilities", 
+    "Contingent liabilities/Total Assets", "Net fixed assets", "Net fixed assets/Total Assets", "Investments", 
+    "Investments/Total Income", "Current assets", "Current assets/Total_Assets", "Net working capital", 
+    "Net working capital/Total Capital", "Quick ratio (times)", "Current ratio (times)", "Debt to equity ratio (times)", 
+    "Cash to current liabilities (times)", "Cash to average cost of sales per day", "Creditors turnover", 
+    "Debtors turnover", "Finished goods turnover", "WIP turnover", "Raw material turnover", "Shares outstanding", 
+    "Equity face value", "EPS", "Adjusted EPS", "PE on BSE", "X1", "X2", "X3", "X4", "X5"
+)
+
+# Select only the mentioned predictors
+x_selected <- x[, all_predictors, drop = FALSE]
+
+# Fit glmnet model with selected predictors
+cv_model_selected <- cv.glmnet(x_selected, y, family = "binomial", alpha = 0.1, lambda = lambda_values)
+
+# Plot to check the lambda values and coefficient shrinkage
+plot(cv_model_selected)
+
+# Coefficients at the optimal lambda
+coef(cv_model_selected, s = "lambda.min")
+
+# Predicting (example)
+predictions_selected <- predict(cv_model_selected, newx = x_selected, s = "lambda.min", type = "response")
+
+```
+
+ROC curve for the amended model 
+
+```{r}
+install.packages("ROCR")
+```
+
+
+```{r}
+# Install and load the ROCR package if not already installed
+
+library(ROCR)
+
+# Predict probabilities for the positive class (class 1)
+predictions <- predict(cv_model_selected, newx = x_selected, s = "lambda.min", type = "response")
+
+# Create a prediction object
+prediction_obj <- prediction(predictions, y)
+
+# Create a performance object
+performance_obj <- performance(prediction_obj, "tpr", "fpr")
+
+
+# Compute AUC
+auc_value <- performance(prediction_obj, "auc")@y.values[[1]]
+
+# Plot the ROC curve with AUC value
+plot(performance_obj, main = paste("ROC Curve (AUC =", round(auc_value, 2), ")", sep = ""), col = "blue", lwd = 2)
+
+# Add legend with AUC value
+legend("bottomright", legend = paste("AUC =", round(auc_value, 2)), col = "blue", lwd = 2, cex = 0.8)
+# Compute sensitivity and specificity for all thresholds
+perf <- performance(prediction_obj, "sens", "spec")
+
+# Calculate Youden's index
+youden_index <- perf@y.values[[1]] + perf@x.values[[1]] - 1
+
+# Find the threshold that maximizes Youden's index
+optimal_threshold <- perf@alpha.values[[1]][which.max(youden_index)]
+
+# Get sensitivity and specificity at the optimal threshold
+sensitivity <- perf@y.values[[1]][which.max(youden_index)]
+specificity <- 1 - perf@x.values[[1]][which.max(youden_index)]
+
+# Print sensitivity and specificity
+cat("Sensitivity:", sensitivity, "\n")
+cat("Specificity:", specificity, "\n")
+
+
+```
+
+
+Classifying the Probability of Default Based on Credit Ratings
+
+```{r}
+# Predict default probabilities using the fitted model
+predicted_probabilities <- predict(cv_model_selected, newx = x_selected, s = "lambda.min", type = "response")
+
+# Define the thresholds and corresponding ratings
+thresholds <- c(1/600, 1/300, 1/150, 1/30, 1/10, 1/5, 1/2, 1)
+ratings <- c("AAA", "AA", "A", "BBB", "BB", "B", "CCC", "CC", "D")
+
+# Function to classify each probability into a rating
+classify_rating <- function(prob) {
+  # Find the first threshold that is greater than the probability
+  index <- findInterval(prob, vec = c(-Inf, thresholds), rightmost.closed = TRUE)
+  # Return the corresponding rating
+  return(ratings[index])
+}
+
+# Apply the classification function to each predicted probability
+data_1$credit_rating_amended_model <- sapply(predicted_probabilities, classify_rating)
+
+# View the first few rows to verify the new column
+head(data_1)
+```
+
+
+
+```{r}
+# Load necessary libraries
+library(glmnet)
+library(Matrix)
+
+# Define custom coefficients for the glmnet model
+coefficients <- c(Intercept = -0.318762388,
+                  X1 = -0.001179271,
+                  X2 = 0.029383,
+                  X3 = 0.374972,
+                  X4 = -8.701390600,
+                  X5 = 0.005789567)
+names(coefficients) <- c("(Intercept)", "X1", "X2", "X3", "X4", "X5")
+
+# Create a sparse matrix of coefficients
+coefs_matrix <- sparseMatrix(i = seq_along(coefficients), j = rep(1, length(coefficients)), x = coefficients)
+
+# Initialize a dummy glmnet model with the custom coefficients
+basic_glmnet_model <- list(a0 = coefficients["(Intercept)"], beta = coefs_matrix[-1, , drop = FALSE],
+                           lambda = 0.01, df = length(coefficients) - 1, dim = c(5, 1), 
+                           dev.ratio = 0.7, nulldev = 0, npasses = 10, jerr = 0, offset = FALSE, 
+                           call = match.call(), nobs = 100)
+class(basic_glmnet_model) <- "glmnet"
+
+# Assume 'data_1' is the dataframe and 'x_selected' contains the predictors
+# For demonstration, creating x_selected as required by the model
+# (Ensure you replace this with your actual predictors)
+x_selected <- model.matrix(~ X1 + X2 + X3 + X4 + X5 - 1, data = data_1)
+
+# Predict default probabilities using the custom model
+predicted_probabilities <- predict(basic_glmnet_model, newx = x_selected, s = "lambda.min", type = "response")
+
+# Define thresholds and corresponding ratings
+thresholds <- c(1/600, 1/300, 1/150, 1/30, 1/10, 1/5, 1/2, 1)
+ratings <- c("AAA", "AA", "A", "BBB", "BB", "B", "CCC", "CC", "D")
+
+# Function to classify each probability into a rating
+classify_rating <- function(prob) {
+  index <- findInterval(prob, vec = c(-Inf, thresholds), rightmost.closed = TRUE)
+  return(ratings[index])
+}
+
+# Apply the classification function to each predicted probability
+data_1$basic_model_credit_rating <- sapply(predicted_probabilities, classify_rating)
+
+# Print the first few rows to verify the new column
+print(head(data_1))
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
